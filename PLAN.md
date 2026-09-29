@@ -283,7 +283,7 @@
 - 借鉴 dolma 四点：attributes 分离存储（正文不可变、分数旁路）、PII 打标延迟到 mix 替换、per-source 流混合器、resiliparse 对照实现。
 - 阶段间 Parquet(Snappy) 交接、schema 集中单文件（daVinci models.go 模式）；图像 webdataset 分片。
 - **配置驱动 + 派生路径 + 幂等分片**（FIM 三件套）；确定性 unique_id（样本进入即铸造，中途不改名——FIM 双 id 纪律）；贵步骤（LLM 标注/增强）逐条原子 checkpoint（tmp+rename）并保留完整 LLM 输出（换阈值重滤不再花钱）。
-- 每条样本血缘字段：`url, source_group, crawl_ts, license, lang, domain_score, edu_score, dedup_flags, safety_verdict, taxonomy, stage_provenance[]`。
+- 每条样本血缘字段：`url, source_group, crawl_ts, license, lang, domain_score, edu_score, dedup_flags, safety_verdict, taxonomy, stage_provenance[]`。完整输出 schema（统一外层 + 四类数据的类型专属字段，含 HF 标杆对照）见**附录 B**。
 
 **LLM 成本量级**（供预算参考）：种子标注 ~10⁵–10⁶ 次小模型调用（vLLM 自托管 7B，成本可忽略）；affordance + 增强用一线模型 API，只喂 S3 头部样本（预估 10⁵–10⁶ 文档 × 每篇 2–5 次调用）——这是管线最大成本项，planner 的"有界增强"就是为此设计。
 
@@ -386,7 +386,80 @@
 | SmolLM3 mid.yaml | 训练配置参照（32K/packing/lr 2e-5/低峰 LR 10%） |
 | Aya Vision / CTP / OmniCorpus / MINT-1T | S2a 图文落点决策、多模态回放与视觉通路保护、交错对文本中性证据（见 6.3 与 notes/06） |
 
-## 附录 B：调研报告索引
+## 附录 B：HF 标杆样本库与输出 schema 标准（v1.2）
+
+> 样本实体与数据卡在 `research/reference/`（samples/ 16 个文件 175 条真实条目；cards/ 13 份数据卡；fetch_samples.py 可重跑）。本附录承载其结论，供远端开发直接查阅；该目录 README 与本附录内容同源。
+
+### B.1 样本清单与我方场景的对应关系
+
+我方爬取数据四类：①漏洞分析/逆向 writeup、②渗透测试报告、③CTF writeup、④安全工具使用教程。
+
+| 参考数据集 | 状态 | 参考价值 | 样本文件 |
+|---|---|---|---|
+| Dolmino / dolma3（OLMo 2/3 MT 数据） | 开放 | **最接近①③④的网页文本化形态**：CC 高质网页、olmOCR 文本化 PDF、StackEdu-FIM、wiki RCQA | `dolmino-cc-hq-software-dev / olmocr-pdf-software / stackedu-fim-{shell,python} / wiki-rcqa` |
+| FIM-Midtraining-400K（TIGER-Lab） | 开放 | 代码 MT 样本格式标杆：掩码上下文→推理→实现 + 全程 metadata | `fim-midtraining-400K` |
+| AgentTrove（169.7 万条 agent 轨迹） | 开放 | 轨迹 schema 标杆：conversations + 验证器三元组 + 溯源四元组 | `agenttrove` |
+| Smoltalk2-Mid（SmolLM3 MT 子集） | 开放 | 推理 MT 的 chat 形态（`<think>`）+ source 字段 | `smoltalk2-mid-{nemotron,openthoughts3}` |
+| MegaMath-Web-Pro-Max | 开放 | **网页→训练文本形态标杆**：LLM 改写后干净正文 + 双打分 + 来源元数据 | `megamath-web-pro-max` |
+| Nemotron-Pretraining-Specialized | 开放 | 专项合成数据形态：自带 docstring/doctest 的"概念教学文档"式代码 | `nemotron-specialized-code-concepts` |
+| OctoLong cross-repo-code-sample | 开放 | 依赖扩展样本 + 扩展过程量化指标 | `octolong-cross-repo` |
+| pentest-agent-dataset-chatml | 开放 | ②渗透测试内容形态（CVE 问答型） | `pentest-agent-chatml` |
+| bug-bounty-pentest-en | 开放 | ②渗透测试报告结构化形态（多 type 行 + 利用/修复/赏金字段） | `bug-bounty-pentest-en` |
+| win-exe-malware-analysis | 开放 | ①逆向分析结构化形态：沙箱报告（进程树/签名/MITRE TTPs），**无二进制** | `win-exe-malware-analysis` |
+| Trendyol-Cybersecurity-Instruct | 开放 | 安全 instruction 形态参照 | `trendyol-cybersec-instruct` |
+| MidTool-Mix（20.3B agentic MT） | **gated** | 最对口的 agentic MT；数据卡已存，schema 见 notes/03 | — |
+| daVinci-Dev | **gated** | 代码 agent MT；数据卡已存 | — |
+| Primus-Seed（Trend Micro 安全 CPT 种子） | **gated** | **最接近我方场景的安全域原始语料**；数据卡已存 | — |
+
+> gated 解锁：`huggingface-cli login` → 数据集页接受条款（MidTool/daVinci 需机构信息）→ 重跑 `fetch_samples.py`。MidTool 两个 fastText 分类器同为 gated（README 已存）。
+
+### B.2 关键观察
+
+- **Dolmino（S1–S3 输出形态基准）**：W3C-IDO 风格 `{text, id, metadata, added, created, source, version}`；正文不可变、分数全进 metadata；`int_score`（FineWeb-Edu 式 0–5）+ `score`（fastText）**双打分并存**；license/repo/path/uri 每条可回溯。CC 高质网页分片为扁平纯文本（保内容轻格式）；olmOCR 分片证明双栏 PDF 线性化即可验收；StackEdu-FIM 分片存原始代码文档，FIM 掩码训练时才套用。
+- **MegaMath-Web-Pro-Max（改写后网页标杆）**：text 为 LLM 改写后的干净正文（结构化步骤、无广告残留），`url+timestamp+lang+lang_score+双分数` 必存——④工具教程、①writeup 的精修层参照。
+- **FIM-400K（代码 MT 样本模板）**：`{messages:[user 固定模板+掩码文件, assistant: ###Reasoning + ###Implementation 代码围栏], metadata, fim_split}`——S7b 逐字段对齐，训练文本与发送 prompt 字节一致。
+- **AgentTrove（轨迹 schema 标杆）**：验证器三元组 `verifier_output/ground_truth/judgment` + 溯源四元组 `original_source/original_teacher/run_id/trial_name`；system prompt 显式规定结构化响应格式（terminal-bench 风格 JSON 批次）——结构可参照，**响应格式须替换为我方 Claude Code/Codex 双模板**。
+- **安全域 instruction 类（形态参考，不作质量标杆）**：bug-bounty 单文件多 type 行（methodology/checklist/technique/qa，各带专属字段）是②的结构化参照；win-exe 沙箱报告（behavior/signatures/ttps）示范"分析报告不含任何二进制工件"（对应 S6 处置矩阵）。这批均为 SFT 风格，归入 S7d 或后训练参考，不进 MT 主池。
+
+### B.3 跨标杆共性纪律（我方输出硬要求）
+
+1. 正文不可变 + 分数旁路（Dolmino 模式）；2. 每条样本可回溯（来源/时间/license 三件套全程携带）；3. 通用质量分与领域分分开存；4. 合成/增强样本必须带溯源与验证（teacher、模板版本、verifier、judgment）；5. 训练形态对齐目标 scaffold（轨迹用双模板）；6. 文本化产出"线性化但结构可读"即可，不追求还原排版。
+
+### B.4 我方四类数据的输出 schema 建议（对齐 S7/S9）
+
+统一外层（所有类型共用）：
+
+```json
+{
+  "sample_type": "writeup|pentest_report|ctf_writeup|tool_tutorial|code_fim|trajectory|state_pair|knowledge_qa",
+  "text": "正文（不可变；markdown 规范化；代码用围栏；终端块用标记）",
+  "metadata": {
+    "id": "内容寻址 id", "url": "", "source_group": "blog|forum|db|doc|pdf|repo",
+    "crawl_ts": "", "license": "", "lang": "", "lang_score": 0.0,
+    "taxonomy": {"bucket": "vuln-analysis", "confidence": 0.9, "axis": "offensive"},
+    "quality": {"domain_score": 0.0, "edu_score": 4, "gopher_pass": true},
+    "safety": {"verdict": "keep|redact|drop", "frr_bucket": "", "judge_scores": {}},
+    "decontam": {"checked_benchmarks": [], "ngram_hits": 0},
+    "images": [{"pos": 12, "caption": "", "ocr_text": "", "hash": "", "kept": false}],
+    "provenance": {"pipeline_version": "", "stage_log": ["extract", "score", "dedup"]}
+  }
+}
+```
+
+| 类型 | text 形态 | 额外 metadata | 参照标杆 |
+|---|---|---|---|
+| ①漏洞/逆向 writeup | markdown：标题/环境/步骤/终端块/结论；截图插 `[图: caption]`+OCR 文本 | `cve_ids[]`, `attack_tactics[]`, `tool_names[]`, `artifact_scan` | dolmino-cc-hq + win-exe-malware |
+| ②渗透测试报告 | 结构化段落：scope→findings→步骤→影响→修复；避免可运营工件 | `report_sections{}`, `severity`, `scope` | bug-bounty 字段集 |
+| ③CTF writeup | 挑战名/分类/难度→思路→命令-观测序列→flag 处理（赛题 flag 打码） | `ctf_event`, `year`(窗口期规则), `category`, `scaffold_format` | pentest-agent + AgentTrove |
+| ④工具教程 | 命令/参数/输出/常见错误；终端块可独立成命令-观测对 | `tool_name`, `tool_version`, `affordance_profile` | megamath 形态 + MidTool affordance |
+| 代码 FIM（S7b） | messages[user 模板+掩码上下文, assistant Reasoning+Implementation] | `fim_split`, `repo_id`, `file_path`, `license` | FIM-400K 逐字段对齐 |
+| 轨迹（S7c） | Claude Code/Codex 双模板 conversations | `scaffold_format`, `verifier_output`, `ground_truth`, `judgment`, `run_id` | AgentTrove 元数据模板 |
+| 状态对（S7c） | (初始快照→目标观测) + 归一化匹配规则 | `env`, `replay_verified(3x)`, `diversity_key` | State2State（notes/03） |
+| 知识 QA（S7d） | 实体锚定 QA；拒绝采样留存 | `entity`, `qa_style`, `reject_rate` | AgentFounder FAS（notes/03） |
+
+> 落地顺序：P0 用本附录统一外层冻结 `metadata` 必填集（id/url/source_group/license/quality/safety），P1 起每类 text 形态以对应标杆样本逐条对照验收。
+
+## 附录 C：调研报告索引
 
 - `research/notes/01-工程骨干与质量过滤.md` — datatrove/dolma 核验、过滤栈、Dolmino/MegaMath/MIRA 细节、SmolLM3 配置
 - `research/notes/02-图文交错与安全领域特殊性.md` — OBELICS/MINT-1T/OCR、数据源许可证清单、双用途草案、去污染
