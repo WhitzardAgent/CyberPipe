@@ -1,0 +1,10 @@
+# 第三方参考仓库（本地 clone，不入库；恢复方式见 README）
+research/repos/
+
+# 参考库运行产物
+research/reference/samples/*.jsonl.tmp
+**/__pycache__/
+*.pyc
+
+# 系统文件
+.DS_Store
