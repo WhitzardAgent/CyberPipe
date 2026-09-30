@@ -467,5 +467,6 @@
 - `research/notes/04-FIM与daVinci-Dev代码级分析.md` — 两仓库代码级核验
 - `research/notes/05-工业报告配比与阶段设计.md` — CWM/Kimi-Dev/Qwen3-Coder-Next 等八篇设计规则
 - `research/notes/06-图文数据落点决策分析.md` — "文本为主 vs 交错"决策分析（v1.2 决策依据，含收口实验协议）
+- `research/notes/07-攻击侧数据源补充调研.md` — Cyber Task Factory 攻击侧补充数据源：新 agentic 基准（XBOW/CVE-Bench/AgentDojo/ASB）、云/AD/移动/IoT 环境母体（CloudGoat/GOAD/BadBlood/Juice Shop）、带官方题解的 CTF 存档、补丁数据集（PrimeVul/CVEfixes）、CTFd 运行时，含范式映射与优先级
 - `research/reference/` — **HF 标杆样本库**：13 个数据集的真实样本条目（samples/）+ 数据卡（cards/）+ 我方四类数据的输出 schema 建议（README.md）；gated 的 MidTool-Mix/daVinci-Dev/Primus-Seed 已存数据卡，登录并接受条款后可用 fetch_samples.py 补齐样本
 - `research/repos/` — FIM-Midtraining、daVinci-Dev、datatrove、dolma、MegaMath（浅克隆）
